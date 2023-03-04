@@ -134,6 +134,7 @@ def svm_bayes(
     len_min=1e-4,
     len_max=1e1,
     log=False,
+    train_val_split: float=0.8,
 ):
     """
     Optimises svm using a guassian process with rbf kernel and lcb aquisition function.
@@ -148,16 +149,18 @@ def svm_bayes(
         len_min: Inverse Lengthscale minimum value.
         len_max: Inverse Lengthscale maximum value.
         log: weather to search logspace in base 10
-        
+        train_val_split: Fraction of train_x used for training rest is validation.
     """
+    # Set Log mode for svm.
     surrogate.log = log
-    
+
+    ## Train test split.
     n = train_y.shape[0]
     index = torch.randperm(n)
     train_x = train_x[index]
     train_y = train_y[index]
-    train_x, val_x = train_x[: -n // 2], train_x[-n // 2 :]
-    train_y, val_y = train_y[: -n // 2], train_y[-n // 2 :]
+    train_x, val_x = train_x[: (n * 0.8) // 1], train_x[(n * 0.8) // 1:]
+    train_y, val_y = train_y[: (n * 0.8) // 1], train_y[(n *0.8) // 1:]
 
     #
     base = 1
@@ -169,14 +172,12 @@ def svm_bayes(
     c_init = base * torch.linspace(c_min, c_max, 4)
     len_init = base * torch.linspace(len_min, len_max, 4)
 
-    # c_search = torch.logspace(-3, 1, points)
-    # inverse_lengthscale_search = torch.logspace(2, 4, points)
-
+    # Reshape to grids, c_grid varies along 0 axis.
+    # len_grid changes along 1 axis.
     len_grid = torch.stack([inverse_lengthscale_search] * points, dim=1).T
     c_grid = torch.stack([c_search] * points, dim=1)
 
-    # c_grid changes every points values len_grid changes every value, all combinations of them are expressed.
-    # print to see
+    # flatten such that all possible combinations of cs and len.
     hyperparm_search = torch.stack(
         (c_grid.reshape(-1, 1), len_grid.reshape(-1, 1)), dim=1
     ).squeeze()
@@ -202,19 +203,19 @@ def svm_bayes(
             hyperparam_error.append(svm_val_error)
             hyperparam_data.append(torch.Tensor([C, len]))
 
+    # Training data
     hyperparam_data = torch.stack(hyperparam_data, dim=0)
     hyperparam_error = torch.Tensor(hyperparam_error)
 
-    assert hyperparam_data.shape[0] == hyperparam_error.shape[0]
-    #    print("hyperparam error", hyperparam_error)
     frames = []
+
     surrogate.fit(hyperparam_data, hyperparam_error)
     for i in range(iterations):
         
         # if log the surrogate does all prediciction in logspace
         mean, cov = surrogate.predict(hyperparm_search)
         if i%10 == 0:
-            print(mean.min().item()) 
+        #    print(mean.min().item())
         if log:
             frame = plot_error_surrogate(
                 mean,
